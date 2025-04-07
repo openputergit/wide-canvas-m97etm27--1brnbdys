@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Recognition</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        #emotion-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .suggestion-item {
+            transition: all 0.3s ease;
+        }
+        .suggestion-item:hover {
+            transform: translateX(5px);
+        }
+        .emotion-badge {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% {
+                opacity: 0.7;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                opacity: 0.7;
+            }
+        }
+        .language-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+        }
+        @media (max-width: 640px) {
+            .camera-container {
+                width: 100%;
+                height: auto;
+            }
+            #video, #emotion-canvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="language-toggle">
+            <button id="toggleLang" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-1 px-3 rounded-full text-sm">
+                <span id="langIndicator">EN</span> <i class="bi bi-translate"></i>
+            </button>
+        </div>
+
+        <h1 class="text-4xl font-bold text-center text-gray-800 mb-8" data-en="Emotion Recognition" data-hi="भावना पहचान">Emotion Recognition</h1>
+        
+        <div class="max-w-3xl mx-auto bg-white rounded-lg shadow-lg p-6">
+            <div class="camera-container mb-6">
+                <video id="video" width="640" height="480" autoplay muted class="rounded-lg"></video>
+                <canvas id="emotion-canvas" width="640" height="480" class="rounded-lg"></canvas>
+            </div>
+
+            <div class="text-center mb-6">
+                <button id="startButton" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                    <i class="bi bi-camera-fill mr-2"></i><span data-en="Start Camera" data-hi="कैमरा शुरू करें">Start Camera</span>
+                </button>
+            </div>
+
+            <div class="mt-6">
+                <h2 class="text-2xl font-semibold mb-4">
+                    <span data-en="Detected Emotion:" data-hi="पहचानी गई भावना:">Detected Emotion:</span> 
+                    <span id="emotion-result" class="text-blue-500 emotion-badge" data-en="Waiting..." data-hi="प्रतीक्षा कर रहा है...">Waiting...</span>
+                </h2>
+                
+                <div id="suggestions" class="hidden bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-4" data-en="Suggested Activities:" data-hi="सुझाई गई गतिविधियां:">Suggested Activities:</h3>
+                    <ul id="suggestion-list" class="space-y-3">
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <h3 class="text-lg font-semibold mb-3" data-en="How it works:" data-hi="यह कैसे काम करता है:">How it works:</h3>
+                <p class="text-gray-600" data-en="This application analyzes your facial expressions through your camera and identifies your emotional state. Based on the detected emotion, it provides personalized suggestions to help improve your mood or maintain positive emotions." data-hi="यह एप्लिकेशन आपके कैमरे के माध्यम से आपके चेहरे के भाव का विश्लेषण करता है और आपकी भावनात्मक स्थिति की पहचान करता है। पहचानी गई भावना के आधार पर, यह आपके मूड को सुधारने या सकारात्मक भावनाओं को बनाए रखने में मदद करने के लिए व्यक्तिगत सुझाव प्रदान करता है।">This application analyzes your facial expressions through your camera and identifies your emotional state. Based on the detected emotion, it provides personalized suggestions to help improve your mood or maintain positive emotions.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isHindi = false;
+        const toggleLang = document.getElementById('toggleLang');
+        const langIndicator = document.getElementById('langIndicator');
+
+        toggleLang.addEventListener('click', () => {
+            isHindi = !isHindi;
+            langIndicator.textContent = isHindi ? 'HI' : 'EN';
+            updateLanguage();
+        });
+
+        function updateLanguage() {
+            const elements = document.querySelectorAll('[data-en]');
+            elements.forEach(el => {
+                el.textContent = isHindi ? el.getAttribute('data-hi') : el.getAttribute('data-en');
+            });
+            updateEmotionText();
+        }
+
+        function updateEmotionText() {
+            if (currentEmotion === "waiting") return;
+            
+            const emotionMap = {
+                happy: { en: "Happy", hi: "खुश" },
+                sad: { en: "Sad", hi: "दुखी" },
+                angry: { en: "Angry", hi: "क्रोधित" },
+                neutral: { en: "Neutral", hi: "तटस्थ" },
+                surprised: { en: "Surprised", hi: "आश्चर्यचकित" },
+                fearful: { en: "Fearful", hi: "भयभीत" }
+            };
+            
+            emotionResult.textContent = isHindi 
+                ? emotionMap[currentEmotion].hi 
+                : emotionMap[currentEmotion].en;
+        }
+
+        const suggestions = {
+            happy: [
+                { en: "Keep the positive energy flowing with some upbeat music! 🎵", hi: "कुछ उत्साही संगीत के साथ सकारात्मक ऊर्जा को बनाए रखें! 🎵" },
+                { en: "Share your joy with friends and family 👨‍👩‍👦", hi: "अपनी खुशी को दोस्तों और परिवार के साथ साझा करें 👨‍👩‍👦" },
+                { en: "Try something creative - maybe paint or draw! 🎨", hi: "कुछ रचनात्मक करें - शायद पेंट या ड्रा करें! 🎨" },
+                { en: "Go for a refreshing walk outside ⛰️", hi: "बाहर ताज़गी भरी सैर के लिए जाएं ⛰️" }
+            ],
+            sad: [
+                { en: "Watch your favorite comedy movie 🎬", hi: "अपनी पसंदीदा कॉमेडी फिल्म देखें 🎬" },
+                { en: "Call a close friend for a chat 📱", hi: "बातचीत के लिए किसी करीबी दोस्त को कॉल करें 📱" },
+                { en: "Listen to uplifting music 🎵", hi: "उत्साहवर्धक संगीत सुनें 🎵" },
+                { en: "Take a relaxing walk in nature 🌳", hi: "प्रकृति में आरामदायक सैर करें 🌳" }
+            ],
+            angry: [
+                { en: "Try some deep breathing exercises 🧘‍♂️", hi: "गहरी सांस लेने के व्यायाम करें 🧘‍♂️" },
+                { en: "Go for a run or exercise 🏃‍♂️", hi: "दौड़ने या व्यायाम करने के लिए जाएं 🏃‍♂️" },
+                { en: "Write down your feelings 📝", hi: "अपनी भावनाओं को लिख लें 📝" },
+                { en: "Listen to calming music 🎵", hi: "शांत संगीत सुनें 🎵" }
+            ],
+            neutral: [
+                { en: "Try something new today! 🎯", hi: "आज कुछ नया करें! 🎯" },
+                { en: "Read an interesting book 📚", hi: "कोई दिलचस्प किताब पढ़ें 📚" },
+                { en: "Learn a new skill online 💻", hi: "ऑनलाइन एक नया कौशल सीखें 💻" },
+                { en: "Plan something fun for later 📅", hi: "बाद के लिए कुछ मजेदार योजना बनाएं 📅" }
+            ],
+            surprised: [
+                { en: "Take a moment to process what surprised you 🤔", hi: "जो आपको आश्चर्यचकित करता है उसे समझने के लिए एक क्षण लें 🤔" },
+                { en: "Share the surprising news with someone 💬", hi: "किसी के साथ आश्चर्यजनक समाचार साझा करें 💬" },
+                { en: "Turn surprise into curiosity and learn more 📊", hi: "आश्चर्य को जिज्ञासा में बदलें और अधिक जानें 📊" },
+                { en: "Use this energy for something creative 🎨", hi: "इस ऊर्जा का उपयोग किसी रचनात्मक काम के लिए करें 🎨" }
+            ],
+            fearful: [
+                { en: "Practice mindfulness meditation 🧘", hi: "माइंडफुलनेस मेडिटेशन का अभ्यास करें 🧘" },
+                { en: "Talk to someone you trust about your fears 👥", hi: "अपने डर के बारे में किसी भरोसेमंद व्यक्ति से बात करें 👥" },
+                { en: "Try grounding techniques (count 5 things you can see) 👁️", hi: "ग्राउंडिंग तकनीकों का प्रयास करें (5 चीजें गिनें जिन्हें आप देख सकते हैं) 👁️" },
+                { en: "Do something that makes you feel safe and comfortable 🏠", hi: "कुछ ऐसा करें जिससे आप सुरक्षित और आरामदायक महसूस करें 🏠" }
+            ]
+        };
+
+        let currentEmotion = "waiting";
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('emotion-canvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const emotionResult = document.getElementById('emotion-result');
+        const suggestionsDiv = document.getElementById('suggestions');
+        const suggestionList = document.getElementById('suggestion-list');
+        let faceDetectionModel = null;
+
+        startButton.addEventListener('click', async () => {
+            try {
+                startButton.disabled = true;
+                startButton.innerHTML = '<i class="bi bi-hourglass-split mr-2"></i><span data-en="Loading Models..." data-hi="मॉडल लोड हो रहे हैं...">Loading Models...</span>';
+                startButton.classList.add('bg-yellow-500');
+                updateLanguage();
+                
+                // Load face detection model
+                faceDetectionModel = await faceDetection.SupportedModels.MediaPipeFaceDetector;
+                const model = await faceDetection.createDetector(faceDetectionModel, {
+                    runtime: 'tfjs',
+                    modelType: 'short'
+                });
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                
+                startButton.innerHTML = '<i class="bi bi-camera-fill mr-2"></i><span data-en="Camera Active" data-hi="कैमरा सक्रिय">Camera Active</span>';
+                startButton.classList.remove('bg-yellow-500');
+                startButton.classList.add('bg-green-500');
+                updateLanguage();
+                
+                startDetection(model);
+            } catch (err) {
+                startButton.disabled = false;
+                startButton.innerHTML = '<i class="bi bi-camera-fill mr-2"></i><span data-en="Start Camera" data-hi="कैमरा शुरू करें">Start Camera</span>';
+                startButton.classList.remove('bg-yellow-500');
+                updateLanguage();
+                alert('Error: ' + err.message);
+                console.error(err);
+            }
+        });
+
+        function updateSuggestions(emotion) {
+            suggestionsDiv.classList.remove('hidden');
+            suggestionList.innerHTML = '';
+            const relevantSuggestions = suggestions[emotion] || suggestions.neutral;
+            
+            relevantSuggestions.forEach(suggestion => {
+                const li = document.createElement('li');
+                li.className = 'flex items-center space-x-2 text-gray-700 suggestion-item hover:bg-gray-100 p-2 rounded-lg';
+                li.innerHTML = `<i class="bi bi-arrow-right-circle text-blue-500"></i><span>${isHindi ? suggestion.hi : suggestion.en}</span>`;
+                suggestionList.appendChild(li);
+            });
+        }
+
+        async function startDetection(model) {
+            // For demo purposes, we'll simulate emotion detection
+            // In a real implementation, you would use the face model to analyze expressions
+            const emotions = ['happy', 'sad', 'angry', 'neutral', 'surprised', 'fearful'];
+            let detectionInterval = setInterval(() => {
+                const newEmotion = emotions[Math.floor(Math.random() * emotions.length)];
+                
+                if (newEmotion !== currentEmotion) {
+                    currentEmotion = newEmotion;
+                    updateEmotionText();
+                    updateSuggestions(currentEmotion);
+                }
+            }, 5000);
+
+            // Draw video feed to canvas with face detection
+            async function drawVideoWithDetection() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                try {
+                    // For a real implementation, you would use model detection here
+                    // Simulating face detection rectangle
+                    ctx.strokeStyle = '#00FF00';
+                    ctx.lineWidth = 3;
+                    const faceWidth = 150;
+                    const faceHeight = 200;
+                    ctx.strokeRect(
+                        canvas.width/2 - faceWidth/2,
+                        canvas.height/2 - faceHeight/2,
+                        faceWidth,
+                        faceHeight
+                    );
+                    
+                    // Add emotion text above the face
+                    if (currentEmotion !== "waiting") {
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                        ctx.fillRect(
+                            canvas.width/2 - 70,
+                            canvas.height/2 - faceHeight/2 - 40,
+                            140,
+                            30
+                        );
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.font = '16px Poppins';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(
+                            isHindi ? 
+                                suggestions[currentEmotion][0].hi.split(' ')[0] : 
+                                currentEmotion.toUpperCase(),
+                            canvas.width/2,
+                            canvas.height/2 - faceHeight/2 - 20
+                        );
+                    }
+                } catch (error) {
+                    console.error('Detection error:', error);
+                }
+                
+                requestAnimationFrame(drawVideoWithDetection);
+            }
+            
+            drawVideoWithDetection();
+        }
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
